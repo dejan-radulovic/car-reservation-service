@@ -12,6 +12,9 @@ services:
       DB_PASSWORD: car_reservation
     ports:
       - "${APP_PORT:-8080}:8080"
+    # caps the JVM too: the image sizes the heap as a percentage of the container's memory limit
+    mem_limit: 1g
+    restart: unless-stopped
 
   postgres:
     image: postgres:18-alpine
@@ -27,7 +30,8 @@ services:
       # postgres 18+ images keep data under /var/lib/postgresql/18/docker; mount the parent directory
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U car_reservation -d car_reservation"]
+      # over TCP: during first-start initialisation the image runs a temporary, socket-only server
+      test: ["CMD-SHELL", "pg_isready -h localhost -U car_reservation -d car_reservation"]
       interval: 5s
       timeout: 3s
       retries: 10

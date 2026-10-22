@@ -32,7 +32,12 @@ json_field() { grep -o "\"$1\":\"[^\"]*\"" "$TMP/body" | head -n 1 | cut -d '"' 
 
 uuid() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n' | sed -E 's/^(.{8})(.{4}).(.{3}).(.{3})(.{12})$/\1-\2-4\3-a\4-\5/'; }
 
-iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; } # GNU or BSD date
+# GNU date takes -d @epoch; BSD/macOS date takes -r epoch (its -d means something else entirely)
+if date --version >/dev/null 2>&1; then
+    iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+else
+    iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+fi
 
 echo "Smoke test against $BASE_URL"
 

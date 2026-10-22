@@ -2,7 +2,8 @@
 # Walks the main flow over HTTP: find an available car, book it, prove the overlap is rejected and the
 # reservation is private, cancel it. Works in Windows PowerShell 5.1 and PowerShell 7+.
 #
-# Usage: scripts\smoke-test.ps1 [-BaseUrl http://localhost:8080]
+# Usage: powershell -ExecutionPolicy Bypass -File scripts\smoke-test.ps1 [-BaseUrl http://localhost:8080]
+#        (the bypass is needed where the default execution policy forbids running scripts)
 param(
     [string] $BaseUrl = $(if ($env:BASE_URL) { $env:BASE_URL } else { 'http://localhost:8080' })
 )
@@ -44,7 +45,8 @@ function Check([bool] $Condition, [string] $Description, $Response) {
     if (-not $Condition) { Fail $Description $Response }
 }
 
-function Iso([datetime] $Time) { $Time.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'") }
+# invariant culture: otherwise e.g. fi-FI formats the time as 08.00.00 and th-TH uses the Buddhist year
+function Iso([datetime] $Time) { $Time.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [cultureinfo]::InvariantCulture) }
 
 Write-Host "Smoke test against $BaseUrl"
 

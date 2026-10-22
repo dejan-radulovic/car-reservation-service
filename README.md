@@ -21,12 +21,14 @@ Maven itself is not required; the bundled wrapper (`./mvnw`) downloads it.
 
 ## Running with Docker
 
-Only Docker is needed; the image is built from source inside Docker.
+Only Docker (23+, with Compose v2) is needed; the image is built from source inside Docker.
 
 ```bash
 docker compose up -d --build   # the service on localhost:8080, PostgreSQL 18 on localhost:15432
-scripts/smoke-test.sh          # or scripts\smoke-test.ps1 on Windows
+scripts/smoke-test.sh          # Linux, macOS, Git Bash
 ```
+
+On Windows without bash: `powershell -ExecutionPolicy Bypass -File scripts\smoke-test.ps1`.
 
 - Swagger UI: <http://localhost:8080/swagger-ui> (the root URL redirects there too)
 - Health check: <http://localhost:8080/actuator/health>

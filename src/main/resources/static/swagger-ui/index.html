@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <title>Car Reservation API</title>
-    <link rel="stylesheet" href="/webjars/swagger-ui/swagger-ui.css">
+    <link rel="stylesheet" href="../webjars/swagger-ui/swagger-ui.css">
 </head>
 <body>
 <div id="swagger-ui"></div>
-<script src="/webjars/swagger-ui/swagger-ui-bundle.js"></script>
+<script src="../webjars/swagger-ui/swagger-ui-bundle.js"></script>
 <script>
     // the same file the server interfaces are generated from, served from static/openapi
     window.ui = SwaggerUIBundle({
-        url: '/openapi/car-reservation-api.yaml',
+        url: '../openapi/car-reservation-api.yaml',
         dom_id: '#swagger-ui',
         deepLinking: true
     });

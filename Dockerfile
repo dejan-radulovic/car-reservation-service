@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests -Djacoc
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
+RUN groupadd --system app && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
 USER app
 
 COPY --from=build /workspace/extracted/dependencies/ ./
@@ -25,7 +25,7 @@ COPY --from=build /workspace/extracted/spring-boot-loader/ ./
 COPY --from=build /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=build /workspace/extracted/application/ ./
 
-# size the heap from the container memory limit rather than the host's RAM
+# size the heap from the container's memory limit (host RAM if none is set) instead of the JVM's 25% default
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"
 EXPOSE 8080
 
