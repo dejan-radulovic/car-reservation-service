@@ -51,6 +51,10 @@ resolve the generated types.
 
 Optional lint (needs Node.js): `npx @redocly/cli lint`
 
+Availability is served from the indexes that already exist for integrity: about 1 ms for a page of
+50 cars with 500,000 reservations in the database. See the
+[query plans and measurements](docs/performance/availability-query.md).
+
 ## Testing
 
 ```bash

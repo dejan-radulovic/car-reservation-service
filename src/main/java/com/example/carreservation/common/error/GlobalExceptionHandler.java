@@ -2,6 +2,7 @@ package com.example.carreservation.common.error;
 
 import com.example.carreservation.api.model.ErrorCodeDto;
 import com.example.carreservation.car.CarNotFoundException;
+import com.example.carreservation.car.InvalidSearchWindowException;
 import com.example.carreservation.reservation.CancellationWindowClosedException;
 import com.example.carreservation.reservation.InvalidBookingPeriodException;
 import com.example.carreservation.reservation.ReservationAlreadyCancelledException;
@@ -57,6 +58,11 @@ class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InvalidBookingPeriodException.class)
     ProblemDetail invalidBookingPeriod(InvalidBookingPeriodException e) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCodeDto.INVALID_BOOKING_PERIOD, "Invalid booking period", e.getMessage());
+    }
+
+    @ExceptionHandler(InvalidSearchWindowException.class)
+    ProblemDetail invalidSearchWindow(InvalidSearchWindowException e) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCodeDto.INVALID_SEARCH_WINDOW, "Invalid search window", e.getMessage());
     }
 
     @ExceptionHandler(CarNotFoundException.class)
