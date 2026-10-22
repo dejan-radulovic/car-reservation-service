@@ -25,6 +25,7 @@ class ReservationSchemaIT {
 
     private static final String EXCLUSION_VIOLATION = "23P01";
     private static final String CHECK_VIOLATION = "23514";
+    private static final String DATA_EXCEPTION = "22000";
     private static final Instant START = Instant.parse("2030-01-15T10:00:00Z");
 
     @Autowired
@@ -94,6 +95,13 @@ class ReservationSchemaIT {
                 .satisfies(e -> assertThat(sqlState(e)).isEqualTo(CHECK_VIOLATION));
         assertThatThrownBy(() -> insert(carId, START, START.plus(Duration.ofHours(24).plusSeconds(1)), "CONFIRMED"))
                 .satisfies(e -> assertThat(sqlState(e)).isEqualTo(CHECK_VIOLATION));
+    }
+
+    @Test
+    void rejectsAnEndBeforeTheStart() {
+        // the generated tstzrange column fails first, with data_exception, before any CHECK runs
+        assertThatThrownBy(() -> insert(carId, START.plus(Duration.ofHours(4)), START, "CONFIRMED"))
+                .satisfies(e -> assertThat(sqlState(e)).isEqualTo(DATA_EXCEPTION));
     }
 
     @Test

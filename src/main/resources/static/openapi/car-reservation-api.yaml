@@ -93,7 +93,8 @@ paths:
         Creates a CONFIRMED reservation. The slot must start in the future and last between
         2 and 24 hours (inclusive, measured as elapsed time). Concurrent requests for
         overlapping slots of the same car are safe: exactly one succeeds, the others receive
-        `409 RESERVATION_CONFLICT`.
+        `409 RESERVATION_CONFLICT`. If the car is busy with another booking for longer than the
+        lock timeout, the request fails with `409 CONCURRENT_MODIFICATION` and can be retried.
       requestBody:
         required: true
         content:
@@ -127,8 +128,18 @@ paths:
       tags: [reservations]
       operationId: getReservation
       summary: Get a reservation
+      description: |
+        Reservations are visible only to their owner: for any other `userId` the response is `404`,
+        exactly as for a reservation that does not exist.
       parameters:
         - $ref: '#/components/parameters/ReservationId'
+        - name: userId
+          in: query
+          required: true
+          description: Must be the owner of the reservation.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: The reservation
@@ -359,7 +370,7 @@ components:
         - `RESERVATION_CONFLICT`: the car already has a CONFIRMED reservation overlapping the slot
         - `RESERVATION_ALREADY_CANCELLED`
         - `CANCELLATION_WINDOW_CLOSED`: less than 30 minutes before `startTime`
-        - `CONCURRENT_MODIFICATION`: the reservation was changed concurrently; retry
+        - `CONCURRENT_MODIFICATION`: a concurrent request changed or is holding the resource; retry
         - `SERVICE_UNAVAILABLE`: the database is unreachable
         - `INTERNAL_ERROR`
       enum:

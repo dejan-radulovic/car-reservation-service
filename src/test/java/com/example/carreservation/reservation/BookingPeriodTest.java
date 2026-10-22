@@ -45,7 +45,7 @@ class BookingPeriodTest {
         // raw duration is 24 h + 999 ns (too long), but PostgreSQL stores microseconds: exactly 24 h
         var period = new BookingPeriod(START, START.plus(Duration.ofHours(24)).plusNanos(999));
 
-        assertThat(period.end()).isEqualTo(START.plus(Duration.ofHours(24)));
+        assertThat(period.endTime()).isEqualTo(START.plus(Duration.ofHours(24)));
         assertThat(period.duration()).isEqualTo(BookingPeriod.MAX_DURATION);
     }
 
@@ -53,8 +53,8 @@ class BookingPeriodTest {
     void truncatesBothInstantsToMicroseconds() {
         var period = new BookingPeriod(START.plusNanos(1_999), START.plus(Duration.ofHours(3)).plusNanos(1));
 
-        assertThat(period.start()).isEqualTo(START.plusNanos(1_000));
-        assertThat(period.end()).isEqualTo(START.plus(Duration.ofHours(3)));
+        assertThat(period.startTime()).isEqualTo(START.plusNanos(1_000));
+        assertThat(period.endTime()).isEqualTo(START.plus(Duration.ofHours(3)));
     }
 
     @Nested

@@ -18,13 +18,13 @@ class ReservationTest {
     private final UUID owner = UUID.randomUUID();
 
     @Nested
-    class Confirm {
+    class Book {
 
         @Test
-        void createsAConfirmedReservation() {
+        void booksAConfirmedReservation() {
             Instant now = START.minus(Duration.ofDays(1));
 
-            var reservation = Reservation.confirm(carId, owner, PERIOD, now);
+            var reservation = Reservation.book(carId, owner, PERIOD, now);
 
             assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
             assertThat(reservation.getCarId()).isEqualTo(carId);
@@ -36,7 +36,7 @@ class ReservationTest {
 
         @Test
         void rejectsAPeriodThatHasAlreadyStarted() {
-            assertThatThrownBy(() -> Reservation.confirm(carId, owner, PERIOD, START))
+            assertThatThrownBy(() -> Reservation.book(carId, owner, PERIOD, START))
                     .isInstanceOf(InvalidBookingPeriodException.class);
         }
     }
@@ -44,7 +44,7 @@ class ReservationTest {
     @Nested
     class Cancel {
 
-        private final Reservation reservation = Reservation.confirm(carId, owner, PERIOD, START.minus(Duration.ofDays(1)));
+        private final Reservation reservation = Reservation.book(carId, owner, PERIOD, START.minus(Duration.ofDays(1)));
 
         @Test
         void cancelsWellBeforeTheStart() {

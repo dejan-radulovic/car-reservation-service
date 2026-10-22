@@ -7,6 +7,6 @@ public class ReservationConflictException extends RuntimeException {
 
     public ReservationConflictException(UUID carId, BookingPeriod period, Throwable cause) {
         super("Car " + carId + " is already reserved for a time slot overlapping "
-                + period.start() + " - " + period.end(), cause);
+                + period.startTime() + " - " + period.endTime(), cause);
     }
 }

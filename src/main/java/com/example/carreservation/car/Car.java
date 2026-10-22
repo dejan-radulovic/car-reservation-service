@@ -1,19 +1,17 @@
 package com.example.carreservation.car;
 
-import com.example.carreservation.common.persistence.UuidV7Generator;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.util.UUID;
-import org.hibernate.annotations.UuidGenerator;
 
+/** A car of the fleet. The fleet is seeded by Liquibase; the API does not create cars. */
 @Entity
 @Table(name = "car")
 public class Car {
 
     @Id
-    @UuidGenerator(algorithm = UuidV7Generator.class)
     private UUID id;
 
     @Column(nullable = false)

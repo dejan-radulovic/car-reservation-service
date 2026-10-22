@@ -1,7 +1,6 @@
 package com.example.carreservation.reservation;
 
 import com.example.carreservation.common.persistence.UuidV7Generator;
-import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -40,9 +39,8 @@ public class Reservation {
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
 
+    // mapped to start_time / end_time by Spring Boot's snake_case naming strategy
     @Embedded
-    @AttributeOverride(name = "start", column = @Column(name = "start_time", nullable = false, updatable = false))
-    @AttributeOverride(name = "end", column = @Column(name = "end_time", nullable = false, updatable = false))
     private BookingPeriod period;
 
     @Enumerated(EnumType.STRING)
@@ -71,29 +69,37 @@ public class Reservation {
         this.status = ReservationStatus.CONFIRMED;
     }
 
-    /** Creates a confirmed reservation; the period must start after {@code now}. */
-    public static Reservation confirm(UUID carId, UUID userId, BookingPeriod period, Instant now) {
+    /** Books the car for the period; the period must start after {@code now}. */
+    public static Reservation book(UUID carId, UUID userId, BookingPeriod period, Instant now) {
         Objects.requireNonNull(period, "period must not be null");
         period.requireStartsAfter(now);
         return new Reservation(carId, userId, period, now);
     }
 
     /**
+     * Reservations are visible only to their owner; to anyone else they do not exist.
+     *
+     * @throws ReservationNotFoundException if {@code actorId} is not the owner
+     */
+    public void requireOwnedBy(UUID actorId) {
+        if (!userId.equals(actorId)) {
+            throw new ReservationNotFoundException(id);
+        }
+    }
+
+    /**
      * Cancels this reservation on behalf of {@code actorId}.
      *
-     * @throws ReservationNotFoundException if {@code actorId} is not the owner, so that other users
-     *     cannot learn that the reservation exists
+     * @throws ReservationNotFoundException if {@code actorId} is not the owner
      * @throws ReservationAlreadyCancelledException if it is already cancelled
      * @throws CancellationWindowClosedException if the start is less than 30 minutes away
      */
     public void cancel(UUID actorId, Instant now) {
-        if (!userId.equals(actorId)) {
-            throw new ReservationNotFoundException(id);
-        }
+        requireOwnedBy(actorId);
         if (status == ReservationStatus.CANCELLED) {
             throw new ReservationAlreadyCancelledException(id);
         }
-        if (now.isAfter(period.start().minus(CANCELLATION_CUTOFF))) {
+        if (now.isAfter(period.startTime().minus(CANCELLATION_CUTOFF))) {
             throw new CancellationWindowClosedException(id);
         }
         status = ReservationStatus.CANCELLED;

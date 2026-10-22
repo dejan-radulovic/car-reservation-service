@@ -1,6 +1,7 @@
 package com.example.carreservation.reservation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.carreservation.IntegrationTest;
 import java.time.Duration;
@@ -21,7 +22,9 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Fires many requests at the same moment, each in its own transaction, and checks the outcome both
@@ -42,6 +45,9 @@ class ConcurrentReservationIT {
     @Autowired
     private JdbcClient jdbc;
 
+    @Autowired
+    private TransactionTemplate transactions;
+
     private List<UUID> cars;
 
     @BeforeEach
@@ -56,7 +62,7 @@ class ConcurrentReservationIT {
         UUID car = cars.getFirst();
         var period = new BookingPeriod(START, START.plus(Duration.ofHours(4)));
 
-        List<Outcome> outcomes = runConcurrently(i -> () -> service.create(UUID.randomUUID(), car, period));
+        List<Outcome> outcomes = runConcurrently(i -> () -> service.book(car, UUID.randomUUID(), period));
 
         assertThat(outcomes).filteredOn(Outcome::succeeded).hasSize(1);
         assertThat(outcomes).filteredOn(o -> o.failedWith(ReservationConflictException.class)).hasSize(THREADS - 1);
@@ -70,7 +76,7 @@ class ConcurrentReservationIT {
         IntFunction<BookingPeriod> period = i -> new BookingPeriod(
                 START.plus(Duration.ofMinutes(i)), START.plus(Duration.ofMinutes(i)).plus(Duration.ofHours(3)));
 
-        List<Outcome> outcomes = runConcurrently(i -> () -> service.create(UUID.randomUUID(), car, period.apply(i)));
+        List<Outcome> outcomes = runConcurrently(i -> () -> service.book(car, UUID.randomUUID(), period.apply(i)));
 
         assertThat(outcomes).filteredOn(Outcome::succeeded).hasSize(1);
         assertThat(outcomes).filteredOn(o -> o.failedWith(ReservationConflictException.class)).hasSize(THREADS - 1);
@@ -78,10 +84,10 @@ class ConcurrentReservationIT {
     }
 
     @Test
-    void requestsForDifferentCarsDoNotBlockEachOther() throws Exception {
+    void requestsForDifferentCarsAllSucceed() throws Exception {
         var period = new BookingPeriod(START, START.plus(Duration.ofHours(4)));
 
-        List<Outcome> outcomes = runConcurrently(i -> () -> service.create(UUID.randomUUID(), cars.get(i), period));
+        List<Outcome> outcomes = runConcurrently(i -> () -> service.book(cars.get(i), UUID.randomUUID(), period));
 
         assertThat(outcomes).allMatch(Outcome::succeeded);
     }
@@ -93,7 +99,7 @@ class ConcurrentReservationIT {
         IntFunction<BookingPeriod> period = i -> new BookingPeriod(
                 START.plus(Duration.ofHours(2L * i)), START.plus(Duration.ofHours(2L * i + 2)));
 
-        List<Outcome> outcomes = runConcurrently(i -> () -> service.create(UUID.randomUUID(), car, period.apply(i)));
+        List<Outcome> outcomes = runConcurrently(i -> () -> service.book(car, UUID.randomUUID(), period.apply(i)));
 
         assertThat(outcomes).allMatch(Outcome::succeeded);
         assertThat(confirmedReservations(car)).isEqualTo(THREADS);
@@ -102,7 +108,7 @@ class ConcurrentReservationIT {
     @RepeatedTest(5)
     void exactlyOneOfManyConcurrentCancellationsWins() throws Exception {
         UUID owner = UUID.randomUUID();
-        Reservation reservation = service.create(owner, cars.getFirst(), new BookingPeriod(START, START.plus(Duration.ofHours(4))));
+        Reservation reservation = service.book(cars.getFirst(), owner, new BookingPeriod(START, START.plus(Duration.ofHours(4))));
 
         List<Outcome> outcomes = runConcurrently(i -> () -> service.cancel(reservation.getId(), owner));
 
@@ -110,7 +116,57 @@ class ConcurrentReservationIT {
         assertThat(outcomes).filteredOn(Outcome::succeeded).hasSize(1);
         assertThat(outcomes).filteredOn(o -> !o.succeeded()).allMatch(o ->
                 o.failedWith(ReservationAlreadyCancelledException.class) || o.failedWith(OptimisticLockingFailureException.class));
-        assertThat(service.get(reservation.getId()).getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(service.get(reservation.getId(), owner).getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+    }
+
+    @Test
+    void aLockedCarDoesNotBlockBookingsOfOtherCars() throws Exception {
+        var period = new BookingPeriod(START, START.plus(Duration.ofHours(4)));
+
+        try (var lock = holdBookingLock(cars.getFirst())) {
+            long startedAt = System.nanoTime();
+            service.book(cars.get(1), UUID.randomUUID(), period);
+
+            // well below the 2 s lock_timeout: the booking never waited for the other car's lock
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(1));
+        }
+    }
+
+    @Test
+    void aBookingWaitingForABusyCarFailsAfterTheLockTimeoutInsteadOfHanging() throws Exception {
+        var period = new BookingPeriod(START, START.plus(Duration.ofHours(4)));
+
+        try (var lock = holdBookingLock(cars.getFirst())) {
+            long startedAt = System.nanoTime();
+
+            assertThatThrownBy(() -> service.book(cars.getFirst(), UUID.randomUUID(), period))
+                    .isInstanceOf(PessimisticLockingFailureException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt))
+                    .isBetween(Duration.ofMillis(1_500), Duration.ofSeconds(5));
+        }
+        assertThat(confirmedReservations(cars.getFirst())).isZero();
+    }
+
+    /** Holds the same car row lock a booking takes, in another transaction, until closed. */
+    private AutoCloseable holdBookingLock(UUID car) throws InterruptedException {
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        ExecutorService holder = Executors.newSingleThreadExecutor();
+        Future<?> transaction = holder.submit(() -> transactions.executeWithoutResult(status -> {
+            jdbc.sql("SELECT id FROM car WHERE id = :id FOR NO KEY UPDATE").param("id", car).query(UUID.class).single();
+            locked.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        return () -> {
+            release.countDown();
+            transaction.get(10, TimeUnit.SECONDS);
+            holder.shutdown();
+        };
     }
 
     private List<Outcome> runConcurrently(IntFunction<Callable<?>> task) throws InterruptedException {

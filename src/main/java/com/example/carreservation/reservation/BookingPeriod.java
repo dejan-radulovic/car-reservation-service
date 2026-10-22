@@ -7,7 +7,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /**
- * The half-open interval {@code [start, end)} a car is reserved for.
+ * The half-open interval {@code [startTime, endTime)} a car is reserved for.
  *
  * <p>Duration is measured as elapsed time on the timeline, so it is immune to time zones and DST:
  * 10:00 to 10:00 the next day in local time is 23 h across a spring-forward night (accepted) and
@@ -17,18 +17,18 @@ import java.util.Objects;
  * exactly the stored one.
  */
 @Embeddable
-public record BookingPeriod(Instant start, Instant end) {
+public record BookingPeriod(Instant startTime, Instant endTime) {
 
     public static final Duration MIN_DURATION = Duration.ofHours(2);
     public static final Duration MAX_DURATION = Duration.ofHours(24);
 
     public BookingPeriod {
-        Objects.requireNonNull(start, "start must not be null");
-        Objects.requireNonNull(end, "end must not be null");
-        start = start.truncatedTo(ChronoUnit.MICROS);
-        end = end.truncatedTo(ChronoUnit.MICROS);
+        Objects.requireNonNull(startTime, "startTime must not be null");
+        Objects.requireNonNull(endTime, "endTime must not be null");
+        startTime = startTime.truncatedTo(ChronoUnit.MICROS);
+        endTime = endTime.truncatedTo(ChronoUnit.MICROS);
 
-        Duration duration = Duration.between(start, end);
+        Duration duration = Duration.between(startTime, endTime);
         if (duration.compareTo(MIN_DURATION) < 0 || duration.compareTo(MAX_DURATION) > 0) {
             throw new InvalidBookingPeriodException(
                     "A reservation must last between 2 and 24 hours, but was " + duration);
@@ -36,12 +36,12 @@ public record BookingPeriod(Instant start, Instant end) {
     }
 
     public Duration duration() {
-        return Duration.between(start, end);
+        return Duration.between(startTime, endTime);
     }
 
     /** Throws unless the period starts strictly after {@code now}. */
     public void requireStartsAfter(Instant now) {
-        if (!start.isAfter(now)) {
+        if (!startTime.isAfter(now)) {
             throw new InvalidBookingPeriodException("A reservation must start in the future");
         }
     }
