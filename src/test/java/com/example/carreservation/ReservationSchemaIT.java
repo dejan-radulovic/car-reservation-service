@@ -13,8 +13,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -22,8 +20,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * Verifies the database-level invariants created by the Liquibase changelog, independently of
  * any application code: these constraints are the last line of defence for data integrity.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class ReservationSchemaIT {
 
     private static final String EXCLUSION_VIOLATION = "23P01";

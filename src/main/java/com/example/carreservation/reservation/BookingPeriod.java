@@ -1,5 +1,6 @@
 package com.example.carreservation.reservation;
 
+import jakarta.persistence.Embeddable;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -15,6 +16,7 @@ import java.util.Objects;
  * <p>Both instants are truncated to microseconds, PostgreSQL's precision, so the validated value is
  * exactly the stored one.
  */
+@Embeddable
 public record BookingPeriod(Instant start, Instant end) {
 
     public static final Duration MIN_DURATION = Duration.ofHours(2);

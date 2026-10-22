@@ -20,6 +20,12 @@ spring:
     virtual:
       enabled: true
 
+logging:
+  level:
+    # Hibernate logs every SQL error before it is translated; expected ones (e.g. 23P01, an overlapping
+    # reservation) are normal business outcomes. Unexpected ones still propagate and are logged once.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+
 management:
   endpoints:
     web:
