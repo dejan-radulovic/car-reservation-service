@@ -31,6 +31,17 @@ PostgreSQL container, without compose.
 
 Health check: <http://localhost:8080/actuator/health>
 
+## API
+
+The API is defined **contract-first** in
+[`car-reservation-api.yaml`](src/main/resources/static/openapi/car-reservation-api.yaml)
+(OpenAPI 3.0.3). The build generates the server interfaces and DTOs from it
+(`target/generated-sources/openapi`), and the controllers implement those interfaces, so the code
+cannot drift from the contract. Run `./mvnw compile` once after cloning so that your IDE can
+resolve the generated types.
+
+Optional lint (needs Node.js): `npx @redocly/cli lint`
+
 ## Testing
 
 ```bash

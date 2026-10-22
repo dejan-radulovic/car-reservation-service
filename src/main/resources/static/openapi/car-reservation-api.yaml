@@ -1,0 +1,434 @@
+openapi: 3.0.3
+info:
+  title: Car Reservation API
+  version: 1.0.0
+  description: |
+    Time-slot based car reservations for a fleet of 10,000 cars.
+
+    **Time values** are ISO-8601 instants with an explicit offset (`2030-01-15T08:00:00Z` or
+    `2030-01-15T10:00:00+02:00`). Values without an offset and numeric epochs are rejected.
+    Responses always use UTC (`Z`). Intervals are half-open: `[startTime, endTime)`, so a
+    reservation ending at 10:00 and one starting at 10:00 do not overlap.
+
+    **Errors** use RFC 9457 Problem Details (`application/problem+json`) with a stable
+    machine-readable `code`:
+    - `400`: the request is malformed (unparseable JSON, missing field, value without offset, bad UUID)
+    - `422`: the request is well-formed but semantically invalid (e.g. duration outside 2–24 h)
+    - `409`: the request is valid, but the current state of the resource forbids it (e.g. overlap)
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: cars
+    description: Fleet listing and availability
+  - name: reservations
+    description: Creating, reading and cancelling reservations
+
+paths:
+  /api/v1/cars:
+    get:
+      tags: [cars]
+      operationId: listCars
+      summary: List the fleet
+      description: Returns all cars, ordered by license plate, one page at a time.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: A page of cars
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/cars/availability:
+    get:
+      tags: [cars]
+      operationId: findAvailableCars
+      summary: Find cars available for an interval
+      description: |
+        Returns cars without a CONFIRMED reservation overlapping `[from, to)`, ordered by license
+        plate. The search window must satisfy `from < to` and be at most 31 days long. The
+        2–24 h rule applies to reservations, not to searches.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Start of the interval (inclusive). URL-encode `+` as `%2B` when using an offset.
+          schema:
+            type: string
+            format: date-time
+          example: '2030-01-15T08:00:00Z'
+        - name: to
+          in: query
+          required: true
+          description: End of the interval (exclusive).
+          schema:
+            type: string
+            format: date-time
+          example: '2030-01-15T12:00:00Z'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: A page of available cars
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/reservations:
+    post:
+      tags: [reservations]
+      operationId: createReservation
+      summary: Reserve a car for a time slot
+      description: |
+        Creates a CONFIRMED reservation. The slot must start in the future and last between
+        2 and 24 hours (inclusive, measured as elapsed time). Concurrent requests for
+        overlapping slots of the same car are safe: exactly one succeeds, the others receive
+        `409 RESERVATION_CONFLICT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+      responses:
+        '201':
+          description: Reservation created
+          headers:
+            Location:
+              description: URL of the created reservation
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/reservations/{reservationId}:
+    get:
+      tags: [reservations]
+      operationId: getReservation
+      summary: Get a reservation
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      responses:
+        '200':
+          description: The reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/reservations/{reservationId}/cancel:
+    post:
+      tags: [reservations]
+      operationId: cancelReservation
+      summary: Cancel a reservation
+      description: |
+        Cancels a CONFIRMED reservation and frees its slot immediately. Only the owner can cancel
+        (otherwise `404`, so the reservation's existence is not revealed), and only while
+        `startTime` is at least 30 minutes in the future.
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelReservationRequest'
+      responses:
+        '200':
+          description: The cancelled reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Zero-based page index.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      description: Page size (at most 200).
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 200
+        default: 50
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Car:
+      type: object
+      required: [id, make, model, licensePlate]
+      properties:
+        id:
+          type: string
+          format: uuid
+        make:
+          type: string
+          example: Toyota
+        model:
+          type: string
+          example: Corolla
+        licensePlate:
+          type: string
+          example: BG-00001
+
+    CarPage:
+      type: object
+      description: |
+        One page of cars. There is deliberately no total count: counting all available cars
+        would repeat the availability query over the whole fleet for every page.
+      required: [items, page, size, hasNext]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Car'
+        page:
+          type: integer
+          format: int32
+          example: 0
+        size:
+          type: integer
+          format: int32
+          example: 50
+        hasNext:
+          type: boolean
+
+    CreateReservationRequest:
+      type: object
+      required: [carId, userId, startTime, endTime]
+      properties:
+        carId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+          description: ISO-8601 instant with an offset; inclusive.
+          example: '2030-01-15T08:00:00Z'
+        endTime:
+          type: string
+          format: date-time
+          description: ISO-8601 instant with an offset; exclusive.
+          example: '2030-01-15T12:00:00Z'
+
+    CancelReservationRequest:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: Must be the owner of the reservation.
+
+    Reservation:
+      type: object
+      required: [id, carId, userId, startTime, endTime, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        carId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+          example: '2030-01-15T08:00:00Z'
+        endTime:
+          type: string
+          format: date-time
+          example: '2030-01-15T12:00:00Z'
+        status:
+          $ref: '#/components/schemas/ReservationStatus'
+        createdAt:
+          type: string
+          format: date-time
+        cancelledAt:
+          type: string
+          format: date-time
+          description: Present only for cancelled reservations.
+
+    ReservationStatus:
+      type: string
+      enum: [CONFIRMED, CANCELLED]
+
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details, extended with a stable `code` and field-level `errors`.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          example: /problems/reservation-conflict
+        title:
+          type: string
+          example: Time slot unavailable
+        status:
+          type: integer
+          format: int32
+          example: 409
+        detail:
+          type: string
+          example: The car is already reserved for an overlapping time slot
+        instance:
+          type: string
+          example: /api/v1/reservations
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        errors:
+          type: array
+          description: Present for validation failures.
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          example: startTime
+        message:
+          type: string
+          example: must be an ISO-8601 instant with an offset
+
+    ErrorCode:
+      type: string
+      description: |
+        - `MALFORMED_REQUEST`: unparseable body or parameter (bad JSON, bad UUID, time without offset)
+        - `VALIDATION_FAILED`: missing or out-of-range fields; see `errors`
+        - `INVALID_BOOKING_PERIOD`: duration outside 2–24 h, or start not in the future
+        - `INVALID_SEARCH_WINDOW`: availability window with `from >= to` or longer than 31 days
+        - `CAR_NOT_FOUND` / `RESERVATION_NOT_FOUND`
+        - `RESERVATION_CONFLICT`: the car already has a CONFIRMED reservation overlapping the slot
+        - `RESERVATION_ALREADY_CANCELLED`
+        - `CANCELLATION_WINDOW_CLOSED`: less than 30 minutes before `startTime`
+        - `CONCURRENT_MODIFICATION`: the reservation was changed concurrently; retry
+        - `SERVICE_UNAVAILABLE`: the database is unreachable
+        - `INTERNAL_ERROR`
+      enum:
+        - MALFORMED_REQUEST
+        - VALIDATION_FAILED
+        - INVALID_BOOKING_PERIOD
+        - INVALID_SEARCH_WINDOW
+        - CAR_NOT_FOUND
+        - RESERVATION_NOT_FOUND
+        - RESERVATION_CONFLICT
+        - RESERVATION_ALREADY_CANCELLED
+        - CANCELLATION_WINDOW_CLOSED
+        - CONCURRENT_MODIFICATION
+        - SERVICE_UNAVAILABLE
+        - INTERNAL_ERROR
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/validation-failed
+            title: Invalid request
+            status: 400
+            detail: Request validation failed
+            instance: /api/v1/reservations
+            code: VALIDATION_FAILED
+            errors:
+              - field: startTime
+                message: must not be null
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/car-not-found
+            title: Car not found
+            status: 404
+            detail: No car with id 0192f7a0-5f3c-7b2e-9c1d-3e4f5a6b7c8d
+            instance: /api/v1/reservations
+            code: CAR_NOT_FOUND
+    Conflict:
+      description: The current state of the resource forbids the request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/reservation-conflict
+            title: Time slot unavailable
+            status: 409
+            detail: The car is already reserved for an overlapping time slot
+            instance: /api/v1/reservations
+            code: RESERVATION_CONFLICT
+    UnprocessableEntity:
+      description: Well-formed but semantically invalid request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/invalid-booking-period
+            title: Invalid booking period
+            status: 422
+            detail: A reservation must last between 2 and 24 hours
+            instance: /api/v1/reservations
+            code: INVALID_BOOKING_PERIOD
