@@ -18,6 +18,7 @@ OpenAPI 3 (contract-first) · Testcontainers · Maven · Docker
 - [Trade-offs and known limitations](#trade-offs-and-known-limitations)
 - [Future improvements](#future-improvements)
 - [Troubleshooting](#troubleshooting)
+- [Project layout](#project-layout)
 
 ## Quick start
 
@@ -42,7 +43,7 @@ The smoke test runs the main flow over HTTP against a running instance:
   the reservation is visible only to its owner;
 - cancels it.
 
-It takes another base URL as its first argument.
+It takes another base URL as its first argument (`-BaseUrl` in the PowerShell version).
 
 - Host ports can be changed with `APP_PORT` and `POSTGRES_PORT`.
 - `docker compose down -v` removes the database volume as well.
@@ -180,7 +181,7 @@ anything ever bypasses the application, the database still refuses invalid data.
 
 ### Concurrency: a finding, and the per-car lock
 
-With the constraint alone, the concurrency tests were *correct*: exactly one of 32 simultaneous
+With the constraint alone (in a local run, before the fix below), the concurrency tests were *correct*: exactly one of 32 simultaneous
 identical bookings won, every time. But almost every loser failed with **`40P01 deadlock_detected`**
 after PostgreSQL's 1-second `deadlock_timeout`, not with a clean `23P01`. A burst took about
 30 seconds. The cause is how exclusion constraints work: each insert first adds its index entry and
@@ -251,9 +252,9 @@ repository, service and controller.
 - **Domain rules live in plain Java.** `BookingPeriod` (a record) validates duration and precision,
   and `Reservation` enforces booking, ownership and cancellation rules. Both are unit-tested without
   Spring or a database. Services only orchestrate.
-- **The dependency between the modules is one-way.** `reservation` reaches cars only through
+- **The dependency between the modules is one-way.** `reservation` looks cars up only through
   `CarLookup`, and holds `carId` rather than a `@ManyToOne Car`. Availability needs reservation data,
-  so `car` defines an interface for it (`CarAvailability`) that `reservation` implements; `car`
+  so `car` defines an interface for it (`CarAvailability`) that `reservation` implements. `car`
   never depends on `reservation`.
 - **Identity is a parameter, never read from the request.** The services take `userId` as an
   argument, so adding authentication changes only the controllers.
@@ -264,6 +265,12 @@ repository, service and controller.
 
 ### Persistence
 
+- **Data model.** Both tables follow the assignment's entities:
+  - `car`: `id` (UUID), `make`, `model`, `license_plate` (unique).
+  - `reservation`: `id`, `car_id` (foreign key to `car`), `user_id`, `start_time`, `end_time` (all
+    `timestamptz`), and `status` (`CONFIRMED` or `CANCELLED`).
+  - `reservation` also has `created_at`, `cancelled_at`, a `version` column for optimistic locking,
+    and the generated `period` range that the exclusion constraint and the availability query use.
 - **Liquibase owns the schema** (XML changelogs under `src/main/resources/db/changelog`), and
   Hibernate only validates it (`ddl-auto: validate`).
   - Native change types are used wherever Liquibase Community has them. PostgreSQL-specific DDL (the
@@ -293,10 +300,10 @@ tests share one Spring context and therefore one container.
 | Web slice (`@WebMvcTest`) | Every error status and `code`; rejection of missing offsets and numeric epochs; the page-size cap; the `Location` header |
 | Schema | The database constraints on their own, with no application code: overlap rejected, back-to-back allowed, cancelled rows ignored, duration `CHECK` |
 | Integration | The reservation lifecycle over HTTP; availability correctness (half-open intervals, cancelled reservations, paging without gaps or duplicates) |
-| **Concurrency** | Each scenario fires 32 requests in parallel transactions, released together by a latch, and asserts both the outcomes and the database state. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
+| **Concurrency** | Most scenarios fire 32 requests in parallel transactions, released together by a latch, and assert both the outcomes and the database state. The last two hold the car lock in a second transaction. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
 
-There are 92 unit and web-slice tests and 49 integration tests. JaCoCo writes a coverage report to
-`target/site/jacoco` (generated code excluded). It shows **96 % line and 77 % branch coverage**, with
+There are 92 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
+coverage report to `target/site/jacoco` (generated code excluded). It shows **96 % line and 77 % branch coverage**, with
 99–100 % of lines in the `car` and `reservation` packages.
 
 ## Development
@@ -360,10 +367,14 @@ separately at the end.
 2. **"My reservations".** `GET /reservations` lists the caller's own reservations, paginated. It would
    bring back the `user_id` index that changeset `003` dropped while nothing queried by user.
 3. **Out-of-service periods.** Maintenance windows and retirement dates block a car exactly like a
-   booking does. They would be modelled as blocking entries covered by the same exclusion constraint,
-   so a conflict with existing reservations is detected race-free and reported as a 409 that lists the
-   affected bookings. Deciding *when* a car is serviced or retired stays with fleet management;
-   whether that time conflicts with bookings is decided here.
+   booking does.
+   - They would be rows of the `reservation` table with a `kind` column, so the same exclusion
+     constraint rejects conflicting inserts race-free.
+   - The 2–24 h duration `CHECK` would then apply to bookings only, since a maintenance window can last
+     for days.
+   - When a block is rejected, a follow-up query finds the affected bookings, and the 409 lists them.
+   - Deciding *when* a car is serviced or retired stays with fleet management; whether that time
+     conflicts with bookings is decided here.
 4. **The fleet projection fed by events.** The `car` table becomes a read model of the Fleet service's
    data (`CarRegistered`, `CarUpdated`, `CarRetired`), kept up to date by an idempotent consumer.
    - It replaces the seed changeset.
@@ -376,7 +387,9 @@ separately at the end.
    before confirming it.
    - It must join the exclusion constraint's predicate (`status IN ('CONFIRMED', 'PENDING_PAYMENT')`),
      or holds would not block the slot.
-   - Expired holds are released by a scheduled job.
+   - A constraint cannot refer to the current time, so an expired hold keeps blocking its slot until it
+     is released. A scheduled job releases expired holds, and the booking path also releases a car's
+     expired holds under the car lock before inserting, so nobody gets a spurious 409.
 7. **Idempotent booking.** An `Idempotency-Key` header on `POST /reservations` lets clients safely
    retry after a timeout without risking a duplicate booking under a new ID.
 8. **Observability.** Micrometer metrics for bookings, conflicts and lock timeouts, OpenTelemetry
