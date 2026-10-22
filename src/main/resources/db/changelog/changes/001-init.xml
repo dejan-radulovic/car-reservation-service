@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="001-btree-gist" author="car-reservation">
+        <comment>Lets a GiST index combine scalar equality (car_id) with range overlap (period).</comment>
+        <sql>CREATE EXTENSION IF NOT EXISTS btree_gist</sql>
+        <rollback>
+            <sql>DROP EXTENSION IF EXISTS btree_gist</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="001-car" author="car-reservation">
+        <createTable tableName="car">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" primaryKeyName="pk_car"/>
+            </column>
+            <column name="make" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="model" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="license_plate" type="varchar(16)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_car_license_plate"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="001-reservation" author="car-reservation">
+        <createTable tableName="reservation">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" primaryKeyName="pk_reservation"/>
+            </column>
+            <column name="car_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_reservation_car" references="car(id)"/>
+            </column>
+            <column name="user_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="start_time" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="end_time" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(16)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="cancelled_at" type="timestamp with time zone"/>
+        </createTable>
+        <createIndex tableName="reservation" indexName="ix_reservation_user">
+            <column name="user_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="001-reservation-integrity" author="car-reservation">
+        <comment>Generated range column, CHECKs and the no-overlap exclusion constraint.
+            No Liquibase Community change types exist for these (addCheckConstraint is a paid change type).</comment>
+        <sql><![CDATA[
+            ALTER TABLE reservation
+                ADD COLUMN period tstzrange
+                    GENERATED ALWAYS AS (tstzrange(start_time, end_time, '[)')) STORED;
+            ALTER TABLE reservation
+                ADD CONSTRAINT ck_reservation_status
+                    CHECK (status IN ('CONFIRMED', 'CANCELLED'));
+            -- timestamptz subtraction is absolute elapsed time, so this is exact and DST-independent
+            ALTER TABLE reservation
+                ADD CONSTRAINT ck_reservation_duration
+                    CHECK (end_time - start_time BETWEEN interval '2 hours' AND interval '24 hours');
+            -- the double-booking guarantee: no two CONFIRMED reservations of one car may overlap
+            ALTER TABLE reservation
+                ADD CONSTRAINT ex_reservation_no_overlap
+                    EXCLUDE USING gist (car_id WITH =, period WITH &&) WHERE (status = 'CONFIRMED');
+        ]]></sql>
+        <rollback>
+            <sql><![CDATA[
+                ALTER TABLE reservation DROP CONSTRAINT ex_reservation_no_overlap;
+                ALTER TABLE reservation DROP CONSTRAINT ck_reservation_duration;
+                ALTER TABLE reservation DROP CONSTRAINT ck_reservation_status;
+                ALTER TABLE reservation DROP COLUMN period;
+            ]]></sql>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

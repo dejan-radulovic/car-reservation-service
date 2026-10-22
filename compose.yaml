@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: car_reservation
+      POSTGRES_USER: car_reservation
+      POSTGRES_PASSWORD: car_reservation
+      TZ: UTC
+    ports:
+      # non-default host port avoids clashing with a locally installed PostgreSQL on 5432
+      - "${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      # postgres 18+ images keep data under /var/lib/postgresql/18/docker; mount the parent directory
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U car_reservation -d car_reservation"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

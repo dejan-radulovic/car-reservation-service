@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="002-seed-cars" author="car-reservation">
+        <comment>The API has no car creation endpoint, so the 10,000-car fleet is seeded here.</comment>
+        <sql><![CDATA[
+            INSERT INTO car (id, make, model, license_plate)
+            SELECT uuidv7(), -- PostgreSQL 18 native; same time-ordered key shape as the application
+                   (ARRAY['Toyota', 'Volkswagen', 'Skoda', 'Renault', 'BMW'])[1 + g % 5],
+                   (ARRAY['Corolla', 'Golf', 'Octavia', 'Clio', 'X1'])[1 + g % 5],
+                   'BG-' || lpad(g::text, 5, '0')
+            FROM generate_series(1, 10000) AS g;
+        ]]></sql>
+        <rollback>
+            <sql>DELETE FROM car WHERE license_plate LIKE 'BG-%'</sql>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
