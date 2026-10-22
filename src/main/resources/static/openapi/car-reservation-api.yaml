@@ -16,8 +16,9 @@ info:
     - `422`: the request is well-formed but semantically invalid (e.g. duration outside 2–24 h)
     - `409`: the request is valid, but the current state of the resource forbids it (e.g. overlap)
 servers:
-  - url: http://localhost:8080
-    description: Local development
+  # relative to the spec's own URL, so Swagger UI calls whichever host and port served it
+  - url: /
+    description: This server
 tags:
   - name: cars
     description: Fleet listing and availability

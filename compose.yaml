@@ -1,4 +1,21 @@
+# `docker compose up --build` runs the whole service; `docker compose up -d postgres` only the database,
+# for running the application from the IDE or with ./mvnw spring-boot:run.
 services:
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/car_reservation
+      DB_USERNAME: car_reservation
+      DB_PASSWORD: car_reservation
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    # caps the JVM too: the image sizes the heap as a percentage of the container's memory limit
+    mem_limit: 1g
+    restart: unless-stopped
+
   postgres:
     image: postgres:18-alpine
     environment:
@@ -13,7 +30,8 @@ services:
       # postgres 18+ images keep data under /var/lib/postgresql/18/docker; mount the parent directory
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U car_reservation -d car_reservation"]
+      # over TCP: during first-start initialisation the image runs a temporary, socket-only server
+      test: ["CMD-SHELL", "pg_isready -h localhost -U car_reservation -d car_reservation"]
       interval: 5s
       timeout: 3s
       retries: 10
