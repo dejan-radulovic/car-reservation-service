@@ -104,6 +104,8 @@
                             <library>spring-boot</library>
                             <apiPackage>com.example.carreservation.api</apiPackage>
                             <modelPackage>com.example.carreservation.api.model</modelPackage>
+                            <!-- generated DTOs must not clash with domain types (Reservation, ReservationStatus) -->
+                            <modelNameSuffix>Dto</modelNameSuffix>
                             <generateApiTests>false</generateApiTests>
                             <generateModelTests>false</generateModelTests>
                             <generateApiDocumentation>false</generateApiDocumentation>
