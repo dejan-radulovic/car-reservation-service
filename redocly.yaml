@@ -1,0 +1,15 @@
+# OpenAPI lint configuration: npx @redocly/cli lint
+apis:
+  car-reservation:
+    root: src/main/resources/static/openapi/car-reservation-api.yaml
+
+extends:
+  - recommended
+
+rules:
+  # Authentication is out of scope for this assignment (see README, "Future improvements").
+  security-defined: off
+  # The only server is local development.
+  no-server-example.com: off
+  # No license has been chosen for this repository.
+  info-license: off

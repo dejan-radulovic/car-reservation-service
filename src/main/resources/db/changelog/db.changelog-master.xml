@@ -7,4 +7,5 @@
 
     <include file="changes/001-init.xml" relativeToChangelogFile="true"/>
     <include file="changes/002-seed-cars.xml" relativeToChangelogFile="true"/>
+    <include file="changes/003-drop-unused-user-index.xml" relativeToChangelogFile="true"/>
 </databaseChangeLog>

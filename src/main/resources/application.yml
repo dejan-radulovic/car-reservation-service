@@ -6,6 +6,11 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:15432/car_reservation}
     username: ${DB_USERNAME:car_reservation}
     password: ${DB_PASSWORD:car_reservation}
+    hikari:
+      # Bound every wait, so a stalled request cannot hold pooled connections indefinitely:
+      # lock_timeout fails a booking that waits > 2 s for a car row lock (55P03), statement_timeout
+      # aborts runaway statements (57014). Both surface as Spring DataAccessExceptions.
+      connection-init-sql: SET lock_timeout = '2s'; SET statement_timeout = '10s'
   jpa:
     open-in-view: false
     hibernate:
@@ -19,6 +24,12 @@ spring:
   threads:
     virtual:
       enabled: true
+
+logging:
+  level:
+    # Hibernate logs every SQL error before it is translated; expected ones (e.g. 23P01, an overlapping
+    # reservation) are normal business outcomes. Unexpected ones still propagate and are logged once.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
 
 management:
   endpoints:
