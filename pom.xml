@@ -21,6 +21,7 @@
         <!-- not managed by Spring Boot -->
         <java-uuid-generator.version>5.2.0</java-uuid-generator.version>
         <openapi-generator.version>7.26.0</openapi-generator.version>
+        <swagger-ui.version>5.34.0</swagger-ui.version>
         <!-- 0.8.14 is the first JaCoCo release that supports Java 25 class files -->
         <jacoco.version>0.8.14</jacoco.version>
         <!-- JaCoCo's prepare-agent owns argLine; Mockito's inline mock maker self-attaches an agent on JDK 21+ -->
@@ -52,6 +53,17 @@
             <groupId>com.fasterxml.uuid</groupId>
             <artifactId>java-uuid-generator</artifactId>
             <version>${java-uuid-generator.version}</version>
+        </dependency>
+        <!-- Swagger UI renders the hand-written spec as is; springdoc would generate a second, code-first one -->
+        <dependency>
+            <groupId>org.webjars</groupId>
+            <artifactId>swagger-ui</artifactId>
+            <version>${swagger-ui.version}</version>
+        </dependency>
+        <!-- version-agnostic /webjars/** paths, so the page does not repeat the version -->
+        <dependency>
+            <groupId>org.webjars</groupId>
+            <artifactId>webjars-locator-lite</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

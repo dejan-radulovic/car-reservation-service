@@ -19,17 +19,32 @@ Testcontainers · Maven
 
 Maven itself is not required; the bundled wrapper (`./mvnw`) downloads it.
 
+## Running with Docker
+
+Only Docker is needed; the image is built from source inside Docker.
+
+```bash
+docker compose up -d --build   # the service on localhost:8080, PostgreSQL 18 on localhost:15432
+scripts/smoke-test.sh          # or scripts\smoke-test.ps1 on Windows
+```
+
+- Swagger UI: <http://localhost:8080/swagger-ui> (the root URL redirects there too)
+- Health check: <http://localhost:8080/actuator/health>
+
+The smoke test runs the main flow end to end over HTTP against a running instance (another URL can be
+passed as the first argument): it books an available car, checks that an overlapping booking is
+rejected and that the reservation is visible only to its owner, then cancels it. Host ports can be
+changed with `APP_PORT` and `POSTGRES_PORT`. `docker compose down -v` also deletes the database.
+
 ## Running locally
 
 ```bash
-docker compose up -d     # PostgreSQL 18 on localhost:15432 (avoids clashing with a local install on 5432)
-./mvnw spring-boot:run   # schema and the 10,000-car seed are applied by Liquibase on startup
+docker compose up -d postgres   # PostgreSQL 18 on localhost:15432 (avoids clashing with a local install on 5432)
+./mvnw spring-boot:run          # schema and the 10,000-car seed are applied by Liquibase on startup
 ```
 
 Alternatively, `./mvnw spring-boot:test-run` starts the application against a throwaway
 PostgreSQL container, without compose.
-
-Health check: <http://localhost:8080/actuator/health>
 
 ## Data
 
@@ -44,7 +59,8 @@ The seed uses PostgreSQL 18's built-in `uuidv7()`, so **PostgreSQL 18+ is requir
 
 The API is defined **contract-first** in
 [`car-reservation-api.yaml`](src/main/resources/static/openapi/car-reservation-api.yaml)
-(OpenAPI 3.0.3). The build generates the server interfaces and DTOs from it
+(OpenAPI 3.0.3), which the running service also publishes as
+[Swagger UI](http://localhost:8080/swagger-ui). The build generates the server interfaces and DTOs from it
 (`target/generated-sources/openapi`), and the controllers implement those interfaces, so the code
 cannot drift from the contract. Run `./mvnw compile` once after cloning so that your IDE can
 resolve the generated types.

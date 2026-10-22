@@ -1,4 +1,18 @@
+# `docker compose up --build` runs the whole service; `docker compose up -d postgres` only the database,
+# for running the application from the IDE or with ./mvnw spring-boot:run.
 services:
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/car_reservation
+      DB_USERNAME: car_reservation
+      DB_PASSWORD: car_reservation
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
   postgres:
     image: postgres:18-alpine
     environment:
