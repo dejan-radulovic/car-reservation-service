@@ -2,10 +2,14 @@ package com.example.carreservation.car;
 
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 interface CarRepository extends JpaRepository<Car, UUID> {
+
+    Slice<Car> findAllBy(Pageable pageable);
 
     /**
      * Locks the car row until the end of the transaction. {@code FOR NO KEY UPDATE} is the weakest
