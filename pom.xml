@@ -183,6 +183,12 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <!-- generated DTOs (equals/hashCode/toString/builders) would only dilute the figure -->
+                            <excludes>
+                                <exclude>com/example/carreservation/api/**</exclude>
+                            </excludes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
