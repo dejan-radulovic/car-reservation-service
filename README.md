@@ -46,6 +46,10 @@ On Windows without bash, run `powershell -ExecutionPolicy Bypass -File scripts\s
 - **OpenAPI spec:** <http://localhost:8080/openapi/car-reservation-api.yaml>
 - **Health check:** <http://localhost:8080/actuator/health>
 
+Other host ports: `APP_PORT=9090 docker compose up -d` (or set it in `.env`), then
+`scripts/smoke-test.sh http://localhost:9090` (`-BaseUrl` in PowerShell); the links follow the port.
+`POSTGRES_PORT` does the same for the database.
+
 On startup, Liquibase creates the schema and seeds the 10,000 cars.
 
 The smoke test runs the main flow over HTTP against a running instance:
@@ -54,10 +58,7 @@ The smoke test runs the main flow over HTTP against a running instance:
   the reservation is visible only to its owner;
 - cancels it.
 
-It takes another base URL as its first argument (`-BaseUrl` in the PowerShell version).
-
-- Host ports can be changed with `APP_PORT` and `POSTGRES_PORT`.
-- `docker compose down -v` removes the database volume as well.
+`docker compose down -v` removes the database volume as well.
 
 ## API
 
@@ -330,7 +331,8 @@ docker compose up -d postgres   # PostgreSQL 18 on localhost:15432 (avoids clash
 `./mvnw spring-boot:test-run` instead starts the application against a throwaway PostgreSQL
 container, with no compose needed.
 
-The database connection can be configured with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`. Run
+The database connection can be configured with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`, and the
+HTTP port (8080) with `SERVER_PORT`. Run
 `./mvnw compile` once after cloning so that the IDE can resolve the generated API types (under
 `target/generated-sources/openapi`). The spec can be linted with `npx @redocly/cli lint` (needs
 Node.js).
