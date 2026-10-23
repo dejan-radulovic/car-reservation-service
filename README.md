@@ -6,6 +6,17 @@ no two confirmed reservations of the same car overlap. When many users try to bo
 the same moment, exactly one succeeds and the others get a clean `409 Conflict`. Integration tests
 prove this against a real database.
 
+How each requirement of the assignment is met:
+
+| Requirement | How | Proven by |
+|---|---|---|
+| No overlapping confirmed reservations of a car | A PostgreSQL exclusion constraint on `(car_id, period) WHERE status = 'CONFIRMED'` | Schema tests, with no application code involved |
+| Concurrent bookings: only one succeeds, the others fail gracefully | The constraint, plus a per-car row lock so that losers get `409 RESERVATION_CONFLICT` instead of a deadlock | Concurrency tests: of 32 parallel bookings, exactly 1 wins |
+| Cancel only while the start is at least 30 minutes away | `Reservation.cancel`, with "now" from an injected `Clock`; optimistic locking for concurrent cancellations | Unit tests on the exact boundary; a concurrent-cancellation test |
+| 2 h minimum, 24 h maximum | `BookingPeriod` validation, repeated as a database `CHECK` | Unit tests to the microsecond; schema tests |
+| Clear status codes for every failure | RFC 9457 Problem Details with a stable `code` | Web-slice tests for every status and `code` |
+| A fleet of 10,000 cars | An anti-join that reuses the constraint's GiST index: about 1 ms for the first page | [Query plans and measurements](docs/performance/availability-query.md) |
+
 **Stack:** Java 25 · Spring Boot 3.5 · PostgreSQL 18 · Hibernate 6.6 · Liquibase (XML changelogs) ·
 OpenAPI 3 (contract-first) · Testcontainers · Maven · Docker
 
@@ -131,8 +142,7 @@ The assignment leaves some points open. These are the interpretations chosen:
 | Where cars come from | The API has no endpoint for creating cars, so a Liquibase changeset seeds 10,000 of them. Fleet master data belongs to a different service (see [Service boundary](#service-boundary)). |
 | 2 h minimum, 24 h maximum | Measured as elapsed time, with both bounds inclusive: `2h ≤ end − start ≤ 24h`. See [Time handling](#time-handling-and-dst) for what this means around DST changes. |
 | Back-to-back bookings (10:00–12:00, then 12:00–14:00) | Allowed: intervals are half-open, `[start, end)`. |
-| Bookings in the past | Rejected: `startTime` must be after the current time. |
-| "At least 30 minutes in the future" | Cancelling is allowed while `now ≤ startTime − 30 min`, so cancelling exactly 30 minutes before the start still works. One consequence: a booking made less than 30 minutes before its start can never be cancelled. That follows directly from the two rules, and the service does not invent a third rule to avoid it. |
+| "At least 30 minutes in the future" | Inclusive: cancelling is allowed while `now ≤ startTime − 30 min`, so cancelling exactly 30 minutes before the start still works. |
 | Cancelling twice | `409 RESERVATION_ALREADY_CANCELLED`. A repeat is reported, not silently ignored. |
 | Availability search window | `from < to` and at most 31 days, to bound the query. The 2–24 h rule applies to bookings, not to searches. |
 | User identity | There is no authentication in scope, so the caller sends `userId`. Reads and cancellations check ownership and answer **404** to anyone else, so outsiders cannot even learn that a reservation exists. [Future improvements](#future-improvements) describes how the token would replace this field. |
@@ -224,8 +234,10 @@ cover them.
   - **25 h** across the fall-back night, which is **rejected (422)**.
 
   This is deliberate: the car really is occupied for that many hours, and it is the only reading under
-  which the Java validation and the database `CHECK` agree. Both transitions are unit-tested in
-  `Europe/Belgrade`.
+  which the Java validation and the database `CHECK` agree.
+- **No time zone is special.** The service never converts to local time, so European, US and other
+  DST rules (or none) all behave the same way. Both transitions are unit-tested in `Europe/Belgrade`
+  and `America/New_York`, whose clocks change on different dates.
 - **Precision is microseconds.** Instants are truncated to microseconds before validation, so the value
   that is validated is exactly the value PostgreSQL stores.
 - **"Now" comes from an injected `Clock`.** Tests can therefore check the 30-minute cancellation
@@ -296,13 +308,13 @@ tests share one Spring context and therefore one container.
 
 | Layer | Examples |
 |---|---|
-| Domain unit | The 2 h / 24 h bounds to the microsecond; DST 23 h accepted and 25 h rejected; the 30-minute cancellation boundary; ownership |
+| Domain unit | The 2 h / 24 h bounds to the microsecond; DST 23 h accepted and 25 h rejected (EU and US); the 30-minute cancellation boundary; ownership |
 | Web slice (`@WebMvcTest`) | Every error status and `code`; rejection of missing offsets and numeric epochs; the page-size cap; the `Location` header |
 | Schema | The database constraints on their own, with no application code: overlap rejected, back-to-back allowed, cancelled rows ignored, duration `CHECK` |
 | Integration | The reservation lifecycle over HTTP; availability correctness (half-open intervals, cancelled reservations, paging without gaps or duplicates) |
 | **Concurrency** | Most scenarios fire 32 requests in parallel transactions, released together by a latch, and assert both the outcomes and the database state. The last two hold the car lock in a second transaction. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
 
-There are 92 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
+There are 94 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
 coverage report to `target/site/jacoco` (generated code excluded). It shows **96 % line and 77 % branch coverage**, with
 99–100 % of lines in the `car` and `reservation` packages.
 
@@ -355,51 +367,98 @@ These stay **within this service's boundary**. Capabilities that belong to other
 separately at the end.
 
 1. **Authentication with tokens.** An external identity provider (e.g. Keycloak) issues JWTs, and this
-   service becomes an OAuth2 resource server.
-   - `userId` comes from the token's `sub` claim and is removed from the request bodies. Because the
-     services already take identity as a parameter, only the controllers change.
-   - That is a breaking API change, so it goes into `/api/v2`, or into a deprecation window that
-     rejects a body `userId` that differs from the token.
+   service becomes an OAuth2 resource server. Every caller presents a token; the flow depends on who
+   is calling:
+   - **customers** (a web or mobile app): authorization code with PKCE, and the customer is the
+     token's `sub` claim;
+   - **other services**: client credentials, authorized by scopes such as `reservations:write`;
+   - **counter staff booking for a customer on site**: their own token, with an `agent` role.
+
+   Consequences for the API:
+   - Customers no longer send `userId`; it comes from the token. Agents and services name the customer
+     in an optional `customerId`, which only those roles and scopes may set. Each reservation also
+     records who made it (`booked_by`), for audit.
+   - Static API keys are not offered: they are long-lived shared secrets with no expiry and no standard
+     claims. A partner that cannot use OAuth2 can be bridged at the gateway.
+   - The services already take identity as a parameter, so reading it from the token changes only the
+     controllers. `customerId` and `booked_by` go further: one more service parameter and one more
+     column. `user_id` stays a UUID, which matches identity providers with UUID subjects such as
+     Keycloak; others would need a mapping.
+   - Removing `userId` is a breaking change, so it goes into `/api/v2`, or into a deprecation window
+     that rejects a body `userId` that differs from the token.
    - 401 and 403 also become Problem Details. Responses from the security filter chain need their own
      handlers for that, because they never reach `@RestControllerAdvice`.
-   - A support role could read and cancel any reservation, but would still be bound by the 30-minute
-     rule, which is a business rule, not a permission.
+   - Agents could read and cancel any customer's reservation, but would still be bound by the
+     30-minute rule, which is a business rule, not a permission.
 2. **"My reservations".** `GET /reservations` lists the caller's own reservations, paginated. It would
    bring back the `user_id` index that changeset `003` dropped while nothing queried by user.
-3. **Out-of-service periods.** Maintenance windows and retirement dates block a car exactly like a
-   booking does.
+3. **Out-of-service periods.** Maintenance windows and planned retirement dates block a car exactly
+   like a booking does (a retirement date as an open-ended block).
    - They would be rows of the `reservation` table with a `kind` column, so the same exclusion
      constraint rejects conflicting inserts race-free.
+   - Inserting a block takes the same car lock as a booking, so a block and a booking of the same car
+     racing each other are serialized exactly like two bookings: whichever commits first wins, and the
+     other gets a 409.
    - The 2–24 h duration `CHECK` would then apply to bookings only, since a maintenance window can last
      for days.
    - When a block is rejected, a follow-up query finds the affected bookings, and the 409 lists them.
    - Deciding *when* a car is serviced or retired stays with fleet management; whether that time
      conflicts with bookings is decided here.
-4. **The fleet projection fed by events.** The `car` table becomes a read model of the Fleet service's
+4. **Displacing bookings.** Some blocks cannot wait (a recall, an accident), and retiring a car affects
+   all of its future bookings. A forced block would run in one transaction:
+   - Find the conflicting bookings and a comparable free car for each, then lock the blocked car and
+     all target cars in ID order, so that two displacements cannot deadlock, and re-check under the
+     locks.
+   - Insert the block. Move each conflicting booking to its target car (it keeps its reservation ID,
+     and the exclusion constraint re-checks the move), or cancel it with a reason (`DISPLACED`) when
+     no comparable car is free.
+   - Publish `ReservationDisplaced` events through the outbox (item 6), so that the customer is told
+     and any refund is handled by the payment service.
+
+   Notes:
+   - "Comparable" needs the car's category and branch in the projection (item 5).
+   - Whether to force a block is a fleet or operations decision; this service only carries it out
+     consistently.
+   - Cars are never deleted, because reservations reference them. A `CarRetired` event sets the car's
+     bookable flag to false, and the same transaction displaces its future bookings. That update locks
+     the car row, and the booking path reads the flag in its locking `SELECT`. So either the booking
+     sees the car is retired, or the retirement sees the booking and displaces it; no booking slips
+     through unnoticed.
+5. **The fleet projection fed by events.** The `car` table becomes a read model of the Fleet service's
    data (`CarRegistered`, `CarUpdated`, `CarRetired`), kept up to date by an idempotent consumer.
    - It replaces the seed changeset.
-   - Only data needed for booking and search is copied (id, make, model, plate, bookable flag), not
-     the full catalogue.
-5. **Publishing reservation events.** `ReservationConfirmed` and `ReservationCancelled` are written to
+   - Only data needed for booking and search is copied (id, make, model, plate, a bookable flag, and
+     the category and branch that item 4 needs), not the full catalogue.
+6. **Publishing reservation events.** `ReservationConfirmed` and `ReservationCancelled` are written to
    a transactional outbox in the same transaction as the reservation, so they are never lost or
    published for a rolled-back booking.
-6. **Payment holds.** A `PENDING_PAYMENT` status with an expiry would let a payment flow reserve a slot
-   before confirming it.
+7. **Payment holds for prepaid bookings.** When payment is taken online before the booking is
+   confirmed, a `PENDING_PAYMENT` status with an expiry lets the payment flow reserve the slot first.
+   - Pay-at-pickup bookings skip the hold and are confirmed directly, as today. Whether a booking has
+     been paid is the payment service's state, not a reservation status, so a payment taken at the
+     counter changes nothing here.
    - It must join the exclusion constraint's predicate (`status IN ('CONFIRMED', 'PENDING_PAYMENT')`),
      or holds would not block the slot.
    - A constraint cannot refer to the current time, so an expired hold keeps blocking its slot until it
      is released. A scheduled job releases expired holds, and the booking path also releases a car's
      expired holds under the car lock before inserting, so nobody gets a spurious 409.
-7. **Idempotent booking.** An `Idempotency-Key` header on `POST /reservations` lets clients safely
+8. **No-shows.** A pay-at-pickup booking costs nothing if the customer does not turn up, but blocks the
+   car for its whole slot. A `NO_SHOW` status, set by a counter agent, or automatically when no pickup
+   event has arrived by the end of a grace period, would be outside the exclusion constraint's
+   predicate and so free the car. Freeing
+   the whole period is safe: its past part can never be booked again anyway. Deposits and no-show fees
+   belong to the payment service.
+9. **Idempotent booking.** An `Idempotency-Key` header on `POST /reservations` lets clients safely
    retry after a timeout without risking a duplicate booking under a new ID.
-8. **Observability.** Micrometer metrics for bookings, conflicts and lock timeouts, OpenTelemetry
+10. **Observability.** Micrometer metrics for bookings, conflicts and lock timeouts, OpenTelemetry
    tracing, and structured JSON logs.
 
 **Outside this service:**
 - **Fleet / catalogue service:** car master data, photos, branches, maintenance planning.
 - **Identity provider:** users, credentials, roles, token issuing.
-- **Pricing and payment:** tariffs and payment authorisation, coordinated with holds (item 6) as a saga.
-- **Notifications:** emails and SMS, driven by the published events (item 5).
+- **Pricing and payment:** tariffs, online and counter payments, deposits and no-show fees. Prepaid
+  bookings coordinate with holds (item 7) as a saga.
+- **Notifications:** emails and SMS, driven by the published events (item 6).
 - **API gateway:** rate limiting and edge concerns.
 
 None of these needs this service's database. Splitting reservations and the bookable inventory
