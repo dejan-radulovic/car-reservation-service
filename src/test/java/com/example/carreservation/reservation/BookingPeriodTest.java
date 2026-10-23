@@ -7,11 +7,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BookingPeriodTest {
@@ -81,28 +82,35 @@ class BookingPeriodTest {
         }
     }
 
-    /** Duration is elapsed time, so "10:00 to 10:00 next day" is not always 24 h across DST changes. */
+    /**
+     * Duration is elapsed time, so "10:00 to 10:00 next day" is not always 24 h across DST changes. The
+     * service never converts to local time, so every zone behaves the same; EU and US are the examples.
+     */
     @Nested
     class DaylightSavingTime {
 
-        private final ZoneId belgrade = ZoneId.of("Europe/Belgrade");
-
-        @Test
-        void acceptsTwentyThreeElapsedHoursAcrossSpringForward() {
-            // EU clocks jump from 02:00 to 03:00 on 2030-03-31
-            Instant start = LocalDateTime.parse("2030-03-30T10:00").atZone(belgrade).toInstant();
-            Instant end = LocalDateTime.parse("2030-03-31T10:00").atZone(belgrade).toInstant();
+        @ParameterizedTest(name = "{0}, {1}")
+        @CsvSource({
+            "Europe/Belgrade,  2030-03-30", // clocks jump from 02:00 to 03:00 on 2030-03-31
+            "America/New_York, 2030-03-09", // clocks jump from 02:00 to 03:00 on 2030-03-10
+        })
+        void acceptsTwentyThreeElapsedHoursAcrossSpringForward(ZoneId zone, LocalDate day) {
+            Instant start = day.atTime(10, 0).atZone(zone).toInstant();
+            Instant end = day.plusDays(1).atTime(10, 0).atZone(zone).toInstant();
 
             var period = new BookingPeriod(start, end);
 
             assertThat(period.duration()).isEqualTo(Duration.ofHours(23));
         }
 
-        @Test
-        void rejectsTwentyFiveElapsedHoursAcrossFallBack() {
-            // EU clocks go back from 03:00 to 02:00 on 2030-10-27
-            Instant start = LocalDateTime.parse("2030-10-26T10:00").atZone(belgrade).toInstant();
-            Instant end = LocalDateTime.parse("2030-10-27T10:00").atZone(belgrade).toInstant();
+        @ParameterizedTest(name = "{0}, {1}")
+        @CsvSource({
+            "Europe/Belgrade,  2030-10-26", // clocks go back from 03:00 to 02:00 on 2030-10-27
+            "America/New_York, 2030-11-02", // clocks go back from 02:00 to 01:00 on 2030-11-03
+        })
+        void rejectsTwentyFiveElapsedHoursAcrossFallBack(ZoneId zone, LocalDate day) {
+            Instant start = day.atTime(10, 0).atZone(zone).toInstant();
+            Instant end = day.plusDays(1).atTime(10, 0).atZone(zone).toInstant();
 
             assertThat(Duration.between(start, end)).isEqualTo(Duration.ofHours(25));
             assertThatThrownBy(() -> new BookingPeriod(start, end))
