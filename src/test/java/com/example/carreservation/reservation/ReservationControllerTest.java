@@ -269,6 +269,32 @@ class ReservationControllerTest {
         assertProblem(result, HttpStatus.METHOD_NOT_ALLOWED, "MALFORMED_REQUEST");
     }
 
+    @Test
+    void addsTheErrorCodeToAnUnknownPath() {
+        MvcTestResult result = mvc.get().uri("/api/v1/no-such-resource").exchange();
+
+        assertProblem(result, HttpStatus.NOT_FOUND, "MALFORMED_REQUEST");
+    }
+
+    @Test
+    void addsTheErrorCodeToAnUnsupportedContentType() {
+        MvcTestResult result = mvc.post().uri("/api/v1/reservations")
+                .contentType(MediaType.TEXT_PLAIN).content("carId=" + CAR).exchange();
+
+        assertProblem(result, HttpStatus.UNSUPPORTED_MEDIA_TYPE, "MALFORMED_REQUEST");
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void sendsNoBodyToAClientThatAcceptsNeitherJsonNorProblemJson() {
+        MvcTestResult result = mvc.get().uri("/api/v1/reservations/{id}?userId={userId}", RESERVATION, USER)
+                .accept(MediaType.TEXT_PLAIN).exchange();
+
+        assertThat(result).hasStatus(HttpStatus.NOT_ACCEPTABLE);
+        assertThat(result).bodyText().isEmpty();
+        verifyNoInteractions(service);
+    }
+
     private static void assertProblem(MvcTestResult result, HttpStatus status, String code) {
         assertThat(result).hasStatus(status).hasContentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
         assertThat(result).bodyJson().extractingPath("$.status").isEqualTo(status.value());
