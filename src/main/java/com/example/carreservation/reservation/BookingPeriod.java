@@ -31,7 +31,8 @@ public record BookingPeriod(Instant startTime, Instant endTime) {
         Duration duration = Duration.between(startTime, endTime);
         if (duration.compareTo(MIN_DURATION) < 0 || duration.compareTo(MAX_DURATION) > 0) {
             throw new InvalidBookingPeriodException(
-                    "A reservation must last between 2 and 24 hours, but was " + duration);
+                    "A reservation must last between " + MIN_DURATION.toHours() + " and "
+                            + MAX_DURATION.toHours() + " hours, but was " + duration);
         }
     }
 
