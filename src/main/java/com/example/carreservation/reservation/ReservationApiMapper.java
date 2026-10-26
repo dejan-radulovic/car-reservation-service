@@ -10,14 +10,22 @@ final class ReservationApiMapper {
     }
 
     static ReservationDto toDto(Reservation reservation) {
-        return new ReservationDto()
-                .id(reservation.getId())
-                .carId(reservation.getCarId())
-                .userId(reservation.getUserId())
-                .startTime(reservation.getPeriod().startTime())
-                .endTime(reservation.getPeriod().endTime())
-                .status(ReservationStatusDto.fromValue(reservation.getStatus().name()))
-                .createdAt(reservation.getCreatedAt())
+        // required fields go through the constructor, so a new required field in the contract breaks the build
+        return new ReservationDto(
+                reservation.getId(),
+                reservation.getCarId(),
+                reservation.getUserId(),
+                reservation.getPeriod().startTime(),
+                reservation.getPeriod().endTime(),
+                toDto(reservation.getStatus()),
+                reservation.getCreatedAt())
                 .cancelledAt(reservation.getCancelledAt());
+    }
+
+    static ReservationStatusDto toDto(ReservationStatus status) {
+        return switch (status) {
+            case CONFIRMED -> ReservationStatusDto.CONFIRMED;
+            case CANCELLED -> ReservationStatusDto.CANCELLED;
+        };
     }
 }
