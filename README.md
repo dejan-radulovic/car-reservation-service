@@ -192,8 +192,8 @@ anything ever bypasses the application, the database still refuses invalid data.
 
 ### Concurrency: a finding, and the per-car lock
 
-With the constraint alone (in a local run, before the fix below), the concurrency tests were *correct*: exactly one of 32 simultaneous
-identical bookings won, every time. But almost every loser failed with **`40P01 deadlock_detected`**
+With the constraint alone (in a local run, before the fix below), the concurrency tests were
+*correct*: exactly one of 32 simultaneous identical bookings won, every time. But almost every loser failed with **`40P01 deadlock_detected`**
 after PostgreSQL's 1-second `deadlock_timeout`, not with a clean `23P01`. A burst took about
 30 seconds. The cause is how exclusion constraints work: each insert first adds its index entry and
 then looks for conflicts. Two in-flight conflicting inserts therefore end up waiting on each other,
@@ -284,7 +284,7 @@ include the data-generation script.
 
 The code is organised **package-by-feature**: `car`, `reservation`, and `common` for the
 cross-cutting pieces (errors, JSON, persistence, time, web). Each feature package holds its entity,
-repository, service and controller.
+repository, service, controller and API mapper.
 
 - **Domain rules live in plain Java.** `BookingPeriod` (a record) validates duration and precision,
   and `Reservation` enforces booking, ownership and cancellation rules. Both are unit-tested without
@@ -365,8 +365,8 @@ tests share one Spring context and therefore one container.
 | Integration | The reservation lifecycle over HTTP; availability correctness (half-open intervals, cancelled reservations, paging without gaps or duplicates) |
 | **Concurrency** | Most scenarios fire 32 requests in parallel transactions, released together by a latch, and assert both the outcomes and the database state. The last two hold the car lock in a second transaction. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
 
-There are 94 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
-coverage report to `target/site/jacoco` (generated code excluded). It shows **96 % line and 77 % branch coverage**, with
+There are 97 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
+coverage report to `target/site/jacoco` (generated code excluded). It shows **96 % line and 80 % branch coverage**, with
 99–100 % of lines in the `car` and `reservation` packages.
 
 ## Development
@@ -553,4 +553,5 @@ src/test/java/...                             unit, web-slice, schema, integrati
 docs/performance/                             availability query plans and measurements
 scripts/                                      smoke tests (bash and PowerShell)
 compose.yaml, Dockerfile                      local stack and container image
+redocly.yaml                                  OpenAPI lint rules
 ```
