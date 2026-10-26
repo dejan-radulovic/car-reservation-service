@@ -5,7 +5,7 @@ import com.example.carreservation.car.CarAvailability;
 import com.example.carreservation.car.SearchWindow;
 import jakarta.persistence.EntityManager;
 import java.util.List;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Repository;
 
 /**
  * Availability is the absence of an overlapping confirmed reservation.
@@ -15,8 +15,12 @@ import org.springframework.stereotype.Component;
  * license plate order from the unique index on {@code license_plate}; with {@code LIMIT} the scan
  * stops after one page. It uses the same half-open {@code tstzrange} as the constraint, so
  * availability and booking can never disagree about what "overlapping" means.
+ *
+ * <p>{@code @Repository}, not {@code @Component}: it uses the {@code EntityManager} directly, so only
+ * the repository proxy translates its JPA exceptions (e.g. a statement timeout) into Spring's
+ * {@code DataAccessException}s, which the error handler maps to proper statuses.
  */
-@Component
+@Repository
 class ReservationBasedCarAvailability implements CarAvailability {
 
     private static final String AVAILABLE_CARS = """

@@ -11,7 +11,7 @@ How each requirement of the assignment is met:
 | Requirement | How | Proven by |
 |---|---|---|
 | No overlapping confirmed reservations of a car | A PostgreSQL exclusion constraint on `(car_id, period) WHERE status = 'CONFIRMED'` | Schema tests, with no application code involved |
-| Concurrent bookings: only one succeeds, the others fail gracefully | The constraint, plus a per-car row lock so that losers get `409 RESERVATION_CONFLICT` instead of a deadlock | Concurrency tests: of 32 parallel bookings, exactly 1 wins |
+| Concurrent bookings: only one succeeds, the others fail gracefully | The constraint, plus a per-car row lock so that losers get `409 RESERVATION_CONFLICT` instead of a deadlock | Concurrency tests: of 32 simultaneous booking requests, exactly 1 wins |
 | Cancel only while the start is at least 30 minutes away | `Reservation.cancel`, with "now" from an injected `Clock`; optimistic locking for concurrent cancellations | Unit tests on the exact boundary; a concurrent-cancellation test |
 | 2 h minimum, 24 h maximum | `BookingPeriod` validation, repeated as a database `CHECK` | Unit tests to the microsecond; schema tests |
 | Clear status codes for every failure | RFC 9457 Problem Details with a stable `code` | Web-slice tests for every status and `code` |
@@ -130,8 +130,11 @@ resource forbids it.
 | 409 | `RESERVATION_ALREADY_CANCELLED` | The reservation is already cancelled |
 | 409 | `CANCELLATION_WINDOW_CLOSED` | The reservation starts in less than 30 minutes |
 | 409 | `CONCURRENT_MODIFICATION` | A concurrent cancellation won, or the car stayed locked longer than the 2 s lock timeout. Safe to retry. |
+| 404, 405, 415 | `MALFORMED_REQUEST` | An unknown path, an unsupported method or an unsupported content type: Spring's own status, plus the `code` |
 | 503 | `SERVICE_UNAVAILABLE` | The database is unreachable or a statement timed out |
 | 500 | `INTERNAL_ERROR` | Anything unexpected. It is logged with its full cause, and the response never exposes stack traces or SQL. |
+
+A client whose `Accept` header allows neither JSON nor Problem Details gets a bare `406` with no body.
 
 ## Assumptions
 
@@ -240,7 +243,8 @@ transaction fails with a retryable `409 CONCURRENT_MODIFICATION` and does not ho
 connection indefinitely. `statement_timeout = 10s` stops runaway statements.
 
 **Cancellation** uses optimistic locking (`@Version`). Of two concurrent cancellations, exactly one
-wins and the other gets `409 CONCURRENT_MODIFICATION`. The rules themselves (owner only, not already
+wins. The other gets `409 CONCURRENT_MODIFICATION` if both read the reservation before either
+committed, or `409 RESERVATION_ALREADY_CANCELLED` if it read the winner's committed cancellation. The rules themselves (owner only, not already
 cancelled, at least 30 minutes before the start) live in `Reservation.cancel`, so plain unit tests
 cover them.
 
@@ -295,8 +299,8 @@ repository, service, controller and API mapper.
   never depends on `reservation`.
 - **Identity is a parameter, never read from the request.** The services take `userId` as an
   argument, so adding authentication changes only the controllers.
-- **Generated code stays at the edge.** Generated DTOs appear only in controllers and mappers; the
-  domain never imports them.
+- **Generated code stays at the edge.** Generated DTOs appear only in controllers, mappers and the
+  error handler (for the `code` values); the domain never imports them.
 - **No hexagonal architecture.** Ports, adapters and mapping layers for five endpoints and two tables
   would add files, not clarity. The one port that pays for itself, `CarAvailability`, exists.
 
@@ -362,10 +366,10 @@ tests share one Spring context and therefore one container.
 | Domain unit | The 2 h / 24 h bounds to the microsecond; DST 23 h accepted and 25 h rejected (EU and US); the 30-minute cancellation boundary; ownership |
 | Web slice (`@WebMvcTest`) | Every error status and `code`; rejection of missing offsets and numeric epochs; the page-size cap; the `Location` header |
 | Schema | The database constraints on their own, with no application code: overlap rejected, back-to-back allowed, cancelled rows ignored, duration `CHECK` |
-| Integration | The reservation lifecycle over HTTP; availability correctness (half-open intervals, cancelled reservations, paging without gaps or duplicates) |
-| **Concurrency** | Most scenarios fire 32 requests in parallel transactions, released together by a latch, and assert both the outcomes and the database state. The last two hold the car lock in a second transaction. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
+| Integration | The reservation lifecycle over HTTP; availability correctness (half-open intervals, cancelled reservations, paging without gaps or duplicates); a statement timeout surfacing as Spring's `QueryTimeoutException` (503) |
+| **Concurrency** | Most scenarios start 32 callers, one virtual thread each, and release them together with a latch. Each call runs in its own transaction. With the default pool of 10 connections, up to 10 of those transactions race inside PostgreSQL at the same moment, and the rest follow as connections free up, as they would in production. The scenarios assert both the outcomes and the database state. The last two hold the car lock in a second transaction. Scenarios: <ul><li>32 identical and 32 partially overlapping bookings: exactly 1 succeeds, 31 conflict</li><li>32 different cars, and 32 disjoint slots of one car: all succeed</li><li>concurrent cancellations: exactly 1 wins</li><li>a locked car does not block other cars</li><li>a booking behind a stalled transaction fails after the lock timeout instead of hanging</li></ul> |
 
-There are 97 unit and web-slice tests and 49 integration tests. `./mvnw verify` also writes a JaCoCo
+There are 97 unit and web-slice tests and 50 integration tests. `./mvnw verify` also writes a JaCoCo
 coverage report to `target/site/jacoco` (generated code excluded). It shows **96 % line and 80 % branch coverage**, with
 99–100 % of lines in the `car` and `reservation` packages.
 
