@@ -450,8 +450,12 @@ separately at the end.
    predicate and so free the car. Freeing
    the whole period is safe: its past part can never be booked again anyway. Deposits and no-show fees
    belong to the payment service.
-9. **Idempotent booking.** An `Idempotency-Key` header on `POST /reservations` lets clients safely
-   retry after a timeout without risking a duplicate booking under a new ID.
+9. **Idempotent booking.** A retried booking cannot create a duplicate (the exclusion constraint
+   rejects it), but a client that retries after a lost response gets `409 RESERVATION_CONFLICT`
+   against its own booking and never learns its id. An `Idempotency-Key` header, unique per user,
+   would return the original reservation instead. The key must be checked as well as the body:
+   matching on the user, car and period alone would hand the reservation id to anyone who knows
+   the user's id, while the user id is still taken from the request.
 10. **Observability.** Micrometer metrics for bookings, conflicts and lock timeouts, OpenTelemetry
    tracing, and structured JSON logs.
 
