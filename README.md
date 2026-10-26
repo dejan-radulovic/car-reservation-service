@@ -211,6 +211,30 @@ the booking transaction starts by locking the car's row with `SELECT … FOR NO 
 - The exclusion constraint remains the actual guarantee. The lock adds liveness and clean errors on
   top of it.
 
+Two requests booking overlapping slots of the same car:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Request A
+    participant B as Request B
+    participant DB as PostgreSQL
+
+    A->>DB: BEGIN, then SELECT id FROM car WHERE id = :car FOR NO KEY UPDATE
+    DB-->>A: row locked
+    B->>DB: BEGIN, then SELECT id FROM car WHERE id = :car FOR NO KEY UPDATE
+    Note over B,DB: B waits for A's lock (at most lock_timeout = 2 s,<br/>then 409 CONCURRENT_MODIFICATION)
+    A->>DB: INSERT INTO reservation (…)
+    DB-->>A: ok (no overlapping CONFIRMED row)
+    A->>DB: COMMIT, releasing the car lock
+    Note over A: 201 Created
+    DB-->>B: row locked
+    B->>DB: INSERT INTO reservation (…)
+    DB-->>B: 23P01: violates ex_reservation_no_overlap (A's row is committed)
+    B->>DB: ROLLBACK
+    Note over B: 409 RESERVATION_CONFLICT
+```
+
 Every wait is bounded. Each connection sets `lock_timeout = 2s`, so a booking stuck behind a stalled
 transaction fails with a retryable `409 CONCURRENT_MODIFICATION` and does not hold a pooled
 connection indefinitely. `statement_timeout = 10s` stops runaway statements.
@@ -277,6 +301,32 @@ repository, service and controller.
   would add files, not clarity. The one port that pays for itself, `CarAvailability`, exists.
 
 ### Persistence
+
+```mermaid
+erDiagram
+    car ||--o{ reservation : "fk_reservation_car"
+    car {
+        uuid id PK "pk_car"
+        varchar make "64, not null"
+        varchar model "64, not null"
+        varchar license_plate UK "16, uq_car_license_plate"
+    }
+    reservation {
+        uuid id PK "pk_reservation"
+        uuid car_id FK "not null"
+        uuid user_id "not null, no FK: identity is external"
+        timestamptz start_time "inclusive"
+        timestamptz end_time "exclusive; ck_reservation_duration: 2-24 h"
+        tstzrange period "generated: [start_time, end_time)"
+        varchar status "ck_reservation_status: CONFIRMED or CANCELLED"
+        bigint version "optimistic locking"
+        timestamptz created_at "not null"
+        timestamptz cancelled_at "nullable"
+    }
+```
+
+`ex_reservation_no_overlap` is `EXCLUDE USING gist (car_id WITH =, period WITH &&) WHERE (status =
+'CONFIRMED')`; its GiST index also serves the availability query.
 
 - **Data model.** Both tables follow the assignment's entities:
   - `car`: `id` (UUID), `make`, `model`, `license_plate` (unique).
