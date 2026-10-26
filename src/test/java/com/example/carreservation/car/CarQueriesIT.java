@@ -1,6 +1,7 @@
 package com.example.carreservation.car;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.carreservation.IntegrationTest;
 import com.example.carreservation.reservation.BookingPeriod;
@@ -10,13 +11,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Listing and availability against the seeded 10,000-car fleet. */
 @IntegrationTest
@@ -35,6 +43,9 @@ class CarQueriesIT {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private TransactionTemplate transactions;
 
     private List<Car> firstCars;
 
@@ -126,6 +137,42 @@ class CarQueriesIT {
 
     private List<Car> availableAmongFirstFive(Instant from, Instant to) {
         return cars.available(new SearchWindow(from, to), 0, 5).cars();
+    }
+
+    @Test
+    void reportsAStatementTimeoutAsASpringDataAccessException() throws Exception {
+        var window = new SearchWindow(T10, T10.plus(Duration.ofHours(2)));
+
+        // the car table is locked exclusively, so the search waits until statement_timeout cancels it
+        try (var lock = holdExclusiveLockOnCars()) {
+            assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+                jdbc.sql("SET LOCAL lock_timeout = 0").update();
+                jdbc.sql("SET LOCAL statement_timeout = '200ms'").update();
+                cars.available(window, 0, 5);
+            })).isInstanceOf(QueryTimeoutException.class);
+        }
+    }
+
+    /** Holds an ACCESS EXCLUSIVE lock on {@code car} in another transaction, until closed. */
+    private AutoCloseable holdExclusiveLockOnCars() throws InterruptedException {
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        ExecutorService holder = Executors.newSingleThreadExecutor();
+        Future<?> transaction = holder.submit(() -> transactions.executeWithoutResult(status -> {
+            jdbc.sql("LOCK TABLE car IN ACCESS EXCLUSIVE MODE").update();
+            locked.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        return () -> {
+            release.countDown();
+            transaction.get(10, TimeUnit.SECONDS);
+            holder.shutdown();
+        };
     }
 
     private void book(Car car, Instant start, Instant end) {
