@@ -1,7 +1,6 @@
 package com.example.carreservation.car;
 
 import com.example.carreservation.api.CarsApi;
-import com.example.carreservation.api.model.CarDto;
 import com.example.carreservation.api.model.CarPageDto;
 import java.time.Instant;
 import org.springframework.http.ResponseEntity;
@@ -22,23 +21,11 @@ class CarController implements CarsApi {
 
     @Override
     public ResponseEntity<CarPageDto> listCars(Integer page, Integer size) {
-        return ResponseEntity.ok(toDto(cars.list(page, size)));
+        return ResponseEntity.ok(CarApiMapper.toDto(cars.list(page, size)));
     }
 
     @Override
     public ResponseEntity<CarPageDto> findAvailableCars(Instant from, Instant to, Integer page, Integer size) {
-        return ResponseEntity.ok(toDto(cars.available(new SearchWindow(from, to), page, size)));
-    }
-
-    private static CarPageDto toDto(CarSlice slice) {
-        return new CarPageDto(
-                slice.cars().stream().map(CarController::toDto).toList(),
-                slice.page(),
-                slice.size(),
-                slice.hasNext());
-    }
-
-    private static CarDto toDto(Car car) {
-        return new CarDto(car.getId(), car.getMake(), car.getModel(), car.getLicensePlate());
+        return ResponseEntity.ok(CarApiMapper.toDto(cars.available(new SearchWindow(from, to), page, size)));
     }
 }

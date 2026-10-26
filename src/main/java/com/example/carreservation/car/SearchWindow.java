@@ -19,7 +19,7 @@ public record SearchWindow(Instant from, Instant to) {
             throw new InvalidSearchWindowException("'from' must be before 'to'");
         }
         if (Duration.between(from, to).compareTo(MAX_LENGTH) > 0) {
-            throw new InvalidSearchWindowException("The search window must not be longer than 31 days");
+            throw new InvalidSearchWindowException("The search window must not be longer than " + MAX_LENGTH.toDays() + " days");
         }
     }
 }
