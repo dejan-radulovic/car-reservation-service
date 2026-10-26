@@ -18,6 +18,8 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    # same policy as the app: otherwise, after a Docker restart, only the app comes back and crash-loops
+    restart: unless-stopped
     environment:
       POSTGRES_DB: car_reservation
       POSTGRES_USER: car_reservation
